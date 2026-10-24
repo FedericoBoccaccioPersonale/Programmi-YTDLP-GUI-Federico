@@ -13,5 +13,5 @@ https://federicoboccaccio.wordpress.com/ytdlp-gui-federico/
 
 # Informazioni
 
-Su GitHub c' è il repository principale, su GitLab è presente il suo clone per backup. Puoi anche scaricare il programma da Itch.
+Su GitHub c' è il repository principale, su GitLab è presente il suo clone per backup. Puoi anche scaricare il programma da Itch.\
 Eventuali versioni beta saranno pubblicate solo su GitHub, grazie alal compilazione online.
