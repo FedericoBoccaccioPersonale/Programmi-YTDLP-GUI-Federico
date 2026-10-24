@@ -1,0 +1,179 @@
+name: Compilazione YTDLP-GUI-Federico (crea release)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Seleziona l'' azione di compilazione'
+        required: true
+        default: 'Compila per tutti'
+        type: choice
+        options:
+          - 'Compila per tutti'
+          - 'Compila per Windows x64'
+          - 'Compila per Linux x64'
+          - 'Compila per macOS arm64'
+
+permissions:
+  contents: write
+
+env:
+  TAG_ANTEPRIMA: anteprima
+
+jobs:
+  setup:
+    name: Configurazione matrice
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      versione: ${{ steps.versione.outputs.versione }}
+    steps:
+      - name: Checkout del codice con tutti i tag
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Calcolo della versione (ultimo tag e data di compilazione)
+        id: versione
+        shell: bash
+        run: |
+          # Ultimo tag creato, escluso quello della Release di anteprima
+          TAG=$(git tag --sort=-creatordate | grep -v -x 'anteprima' | head -n 1 || true)
+          if [ -z "$TAG" ]; then
+            echo "::error::Nessun tag trovato nel repository: crea un tag (Releases > Draft a new release > Choose a tag > Create new tag) prima di compilare."
+            exit 1
+          fi
+          TAG_PULITO="${TAG//[^A-Za-z0-9._-]/-}"
+          VERSIONE="${TAG_PULITO}_$(date -u +%Y-%m-%d)"
+          echo "Versione: $VERSIONE"
+          echo "versione=$VERSIONE" >> "$GITHUB_OUTPUT"
+
+      - id: set-matrix
+        shell: bash
+        run: |
+          TARGET="${{ github.event.inputs.target }}"
+
+          WIN='{"os":"windows-latest","os_name":"Windows x64","slug":"Windows-x64","sep":";","icona":"ico/Papirus-Team-Papirus-Apps-Youtube-dl.ico"}'
+          LINUX='{"os":"ubuntu-latest","os_name":"Linux x64","slug":"Linux-x64","sep":":","icona":"NONE"}'
+          MAC='{"os":"macos-latest","os_name":"macOS arm64","slug":"macOS-arm64","sep":":","icona":"ico/Papirus-Team-Papirus-Apps-Youtube-dl.icns"}'
+
+          if [ "$TARGET" = "Compila per Windows x64" ]; then
+            MATRIX="{\"include\":[$WIN]}"
+          elif [ "$TARGET" = "Compila per Linux x64" ]; then
+            MATRIX="{\"include\":[$LINUX]}"
+          elif [ "$TARGET" = "Compila per macOS arm64" ]; then
+            MATRIX="{\"include\":[$MAC]}"
+          else
+            MATRIX="{\"include\":[$WIN,$LINUX,$MAC]}"
+          fi
+
+          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+
+  release:
+    name: Preparazione Release di anteprima
+    needs: setup
+    runs-on: ubuntu-latest
+    steps:
+      - name: Creazione della Release se non esiste e aggiornamento delle note
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view "$TAG_ANTEPRIMA" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release create "$TAG_ANTEPRIMA" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
+              --title "Anteprima: compilazioni di prova" --notes "In preparazione"
+          fi
+          gh release edit "$TAG_ANTEPRIMA" --repo "$GITHUB_REPOSITORY" \
+            --notes "Ultima esecuzione: versione ${{ needs.setup.outputs.versione }}, ramo ${GITHUB_REF_NAME}, commit ${GITHUB_SHA}, https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+  build:
+    name: ${{ matrix.os_name }}
+    needs: [setup, release]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
+
+    steps:
+      - name: Checkout del codice
+        uses: actions/checkout@v7
+
+      - name: Impostazione della versione (ultimo tag e data, calcolati nel job setup)
+        shell: bash
+        run: |
+          echo "VERSION=${{ needs.setup.outputs.versione }}" >> "$GITHUB_ENV"
+
+      - name: Configurazione Python 3.11
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Installazione dipendenze
+        run: |
+          python -m pip install --upgrade pip
+          pip install --upgrade "yt-dlp[default,curl-cffi]" PySide6 pyinstaller certifi
+
+      - name: Verifica dei file di lingua
+        shell: bash
+        run: |
+          python - <<'PYEOF'
+          import glob, json, re, sys
+          lingue = {}
+          for percorso in sorted(glob.glob("locales/*.json")):
+              # Si usa solo il nome del file: su Windows glob restituisce i percorsi con la barra rovesciata
+              nome = re.split(r"[\\/]", percorso)[-1]
+              with open(percorso, encoding="utf-8-sig") as f:
+                  dati = json.load(f)
+              if not isinstance(dati, dict):
+                  sys.exit(f"{percorso}: il file non contiene un oggetto JSON")
+              lingue[nome] = set(dati)
+          if "it.json" not in lingue:
+              sys.exit("locales/it.json (lingua di riferimento) non trovato")
+          riferimento = lingue["it.json"]
+          for nome, chiavi in sorted(lingue.items()):
+              mancanti = sorted(riferimento - chiavi)
+              if mancanti:
+                  print(f"::warning file=locales/{nome}::chiavi mancanti rispetto a it.json: {', '.join(mancanti)}")
+          print(f"File di lingua validi: {len(lingue)}")
+          PYEOF
+
+      - name: Creazione cartella di distribuzione con documentazione e file di lingua
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp -r README.md doc dist/
+          cp -r locales dist/locales
+
+      - name: Scrittura del numero di versione nel programma
+        shell: bash
+        run: |
+          echo "VERSIONE = \"${VERSION}\"" > versione.py
+          cat versione.py
+
+      - name: Compilazione con PyInstaller
+        run: >
+          pyinstaller --noconfirm --onefile --windowed --name "YTDLP-GUI-Federico"
+          --icon "${{ matrix.icona }}"
+          --add-data "ico/Papirus-Team-Papirus-Apps-Youtube-dl.512.png${{ matrix.sep }}ico"
+          main.py
+
+      - name: Creazione ZIP (Windows x64)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist\* -DestinationPath "YTDLP-GUI-Federico-${{ env.VERSION }}-${{ matrix.slug }}.zip"
+
+      - name: Creazione ZIP (Linux/macOS)
+        if: matrix.os != 'windows-latest'
+        run: |
+          cd dist
+          zip -r "../YTDLP-GUI-Federico-${{ env.VERSION }}-${{ matrix.slug }}.zip" ./*
+
+      - name: Pubblicazione nella Release di anteprima
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ZIP="YTDLP-GUI-Federico-${VERSION}-${{ matrix.slug }}.zip"
+          gh release upload "$TAG_ANTEPRIMA" "$ZIP" --clobber --repo "$GITHUB_REPOSITORY"
+          echo "Scaricabile da: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG_ANTEPRIMA}" >> "$GITHUB_STEP_SUMMARY"
