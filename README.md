@@ -7,6 +7,8 @@ https://federicoboccaccio.wordpress.com/ytdlp-gui-federico/
 | ------------- | ------------------------------------------------ | ---------------------------------- | ----------------------------------------- | ------------------------------------------------------------ |
 | 🇺🇸 ENGLISH  | [Documentation](doc/en/documentation.en.md) 📚   | [Roadmap](doc/en/ROADMAP.en.md) 🗺️  | [Contributing](doc/en/contributing.en.md) 🤝 | [Code of conduct](doc/en/code_of_conduct.en.md) 📜           |
 
+![screenshot](YTDLP-GUI-Federico%20screenshot.png)
+
 # Download
 
 [Ultima versione/Last Version](https://github.com/FedericoBoccaccioPersonale/Programmi-YTDLP-GUI-Federico/releases/latest) (Windows x64, Linux x64, Mac OS arm)
